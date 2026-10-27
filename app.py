@@ -9,7 +9,6 @@ st.title("Chartink/Custom Strategy Backtester")
 
 @st.cache_data
 def load_symbols():
-    # Referencing the exact file uploaded to the repository
     file_path = "STOCK SYMBOLS (5).csv"
     if os.path.exists(file_path):
         df_symbols = pd.read_csv(file_path)
@@ -32,11 +31,10 @@ start_date = st.sidebar.date_input("Start Date", pd.to_datetime("2020-01-01"))
 end_date = st.sidebar.date_input("End Date", pd.to_datetime("today"))
 buy_amount = st.sidebar.number_input("Buy Amount (Rs)", value=10000)
 
-# Naya Slider Averaging Down ke liye
 dip_percentage_input = st.sidebar.slider(
     "Averaging Dip Percentage (%)", 
     min_value=1.0, 
-    max_value=99.0, 
+    max_value=20.0, 
     value=5.0, 
     step=0.5,
     help="Agar stock itne % aur girta hai toh ye firse Rs 10000 ka buy karega."
@@ -57,10 +55,13 @@ if st.sidebar.button("Run Backtest"):
             df['min_250'] = df['Close'].rolling(window=250).min()
             df['max_250'] = df['Close'].rolling(window=250).max()
             
-            # --- 2. Filter Condition ---
+            # --- 2. Filter & Exit All Condition ---
             df['is_250_low'] = df['Close'] <= df['min_250']
             df['count_low_250'] = df['is_250_low'].rolling(window=250).sum()
             df['cond_filter'] = df['count_low_250'] == 0
+            
+            # Naya Stop Loss / Exit All Signal
+            df['exit_all_signal'] = df['is_250_low'] 
             
             # --- 3. Primary Buy Condition ---
             df['ratio_drop'] = df['max_250'] / df['Close']
@@ -70,7 +71,7 @@ if st.sidebar.button("Run Backtest"):
             df['count_max_drop_20_ago'] = df['is_max_drop'].shift(1).rolling(window=20).sum()
             df['buy_signal'] = df['cond_filter'] & df['is_max_drop'] & (df['count_max_drop_20_ago'] == 0)
             
-            # --- 4. Exit Condition ---
+            # --- 4. Exit Half Condition (Profit Booking) ---
             df['ratio_gain'] = df['Close'] / df['min_250']
             df['max_ratio_gain_250'] = df['ratio_gain'].rolling(window=250).max()
             df['is_max_gain'] = df['ratio_gain'] >= df['max_ratio_gain_250']
@@ -113,8 +114,18 @@ if st.sidebar.button("Run Backtest"):
                         "Date": date, "Type": "BUY (Averaging Dip)", "Price": round(price, 2), 
                         "Quantity": round(qty_bought, 4), "Value": buy_amount, "Holdings": round(quantity, 4)
                     })
+                    
+                # Condition C: Exit ALL (Stop Loss / Trend Break)
+                elif row['exit_all_signal'] and quantity > 0:
+                    sell_value = quantity * price
+                    total_realized += sell_value
+                    trades.append({
+                        "Date": date, "Type": "SELL ALL (Stop Loss)", "Price": round(price, 2), 
+                        "Quantity": round(quantity, 4), "Value": round(sell_value, 2), "Holdings": 0.0
+                    })
+                    quantity = 0.0  # Reset holding to 0
                 
-                # Condition C: Sell Half Quantity
+                # Condition D: Sell Half Quantity (Profit Booking)
                 elif row['sell_signal'] and quantity > 0:
                     qty_sold = quantity * 0.5
                     sell_value = qty_sold * price
@@ -146,10 +157,8 @@ if st.sidebar.button("Run Backtest"):
             st.subheader("Price Chart with Buy/Sell Signals")
             fig = go.Figure()
             
-            # Main Candlestick
             fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='Price'))
             
-            # Extract points from trades for accurate plotting
             if trades:
                 primary_dates = [t['Date'] for t in trades if t['Type'] == "BUY (Primary)"]
                 primary_prices = [t['Price'] for t in trades if t['Type'] == "BUY (Primary)"]
@@ -157,8 +166,11 @@ if st.sidebar.button("Run Backtest"):
                 avg_dates = [t['Date'] for t in trades if t['Type'] == "BUY (Averaging Dip)"]
                 avg_prices = [t['Price'] for t in trades if t['Type'] == "BUY (Averaging Dip)"]
                 
-                sell_dates = [t['Date'] for t in trades if t['Type'] == "SELL (Half Qty)"]
-                sell_prices = [t['Price'] for t in trades if t['Type'] == "SELL (Half Qty)"]
+                sell_half_dates = [t['Date'] for t in trades if t['Type'] == "SELL (Half Qty)"]
+                sell_half_prices = [t['Price'] for t in trades if t['Type'] == "SELL (Half Qty)"]
+                
+                sell_all_dates = [t['Date'] for t in trades if t['Type'] == "SELL ALL (Stop Loss)"]
+                sell_all_prices = [t['Price'] for t in trades if t['Type'] == "SELL ALL (Stop Loss)"]
                 
                 fig.add_trace(go.Scatter(x=primary_dates, y=primary_prices, mode='markers', 
                                          marker=dict(color='lime', size=12, symbol='triangle-up'), name='Primary Buy'))
@@ -166,8 +178,11 @@ if st.sidebar.button("Run Backtest"):
                 fig.add_trace(go.Scatter(x=avg_dates, y=avg_prices, mode='markers', 
                                          marker=dict(color='cyan', size=10, symbol='triangle-up'), name='Average Dip Buy'))
                                          
-                fig.add_trace(go.Scatter(x=sell_dates, y=sell_prices, mode='markers', 
+                fig.add_trace(go.Scatter(x=sell_half_dates, y=sell_half_prices, mode='markers', 
                                          marker=dict(color='red', size=12, symbol='triangle-down'), name='Sell Half'))
+                                         
+                fig.add_trace(go.Scatter(x=sell_all_dates, y=sell_all_prices, mode='markers', 
+                                         marker=dict(color='orange', size=14, symbol='x'), name='Exit All (SL)'))
             
             fig.update_layout(height=600, template="plotly_dark", xaxis_rangeslider_visible=False)
             st.plotly_chart(fig, use_container_width=True)
