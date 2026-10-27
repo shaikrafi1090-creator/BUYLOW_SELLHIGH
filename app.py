@@ -36,7 +36,7 @@ buy_amount = st.sidebar.number_input("Buy Amount (Rs)", value=10000)
 dip_percentage_input = st.sidebar.slider(
     "Averaging Dip Percentage (%)", 
     min_value=1.0, 
-    max_value=20.0, 
+    max_value=99.0, 
     value=5.0, 
     step=0.5,
     help="Agar stock itne % aur girta hai toh ye firse Rs 10000 ka buy karega."
