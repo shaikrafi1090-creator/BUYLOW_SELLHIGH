@@ -59,21 +59,53 @@ if st.sidebar.button("Run Backtest"):
             # Final Sell Signal
             df['sell_signal'] = df['is_max_gain'] & (df['count_max_gain_20_ago'] == 0)
             
-           # --- 5. Backtest Engine (With Dip Buying / Averaging Down) ---
-quantity = 0.0
-cash_deployed = 0.0
-total_realized = 0.0
-trades = []
-
-last_buy_price = 0.0
-dip_percentage_to_buy_again = 0.99  # 5% aur girne par firse buy karega (Aap isko 0.10 bhi kar sakte hain)
-
-for date, row in df.iterrows():
-    if pd.isna(row['Close']):
-        continue
-        
-    price = float(row['Close'])
-    
+          # --- 5. Backtest Engine (With Dip Buying / Averaging Down) ---
+            quantity = 0.0
+            cash_deployed = 0.0
+            total_realized = 0.0
+            trades = []
+            
+            last_buy_price = 0.0
+            dip_percentage_to_buy_again = 0.05  # 5% aur girne par firse buy karega
+            
+            for date, row in df.iterrows():
+                if pd.isna(row['Close']):
+                    continue
+                    
+                price = float(row['Close'])
+                
+                # 1. Primary Buy (Jab aapki main condition true ho)
+                if row['buy_signal']:
+                    qty_bought = buy_amount / price
+                    quantity += qty_bought
+                    cash_deployed += buy_amount
+                    last_buy_price = price
+                    trades.append({
+                        "Date": date, "Type": "BUY (Primary)", "Price": round(price, 2), 
+                        "Quantity": round(qty_bought, 4), "Value": buy_amount, "Holdings": round(quantity, 4)
+                    })
+                
+                # 2. Secondary Buy (Agar pehle se hold hai, aur price aur 5% gir gaya)
+                elif quantity > 0 and price <= last_buy_price * (1 - dip_percentage_to_buy_again):
+                    qty_bought = buy_amount / price
+                    quantity += qty_bought
+                    cash_deployed += buy_amount
+                    last_buy_price = price
+                    trades.append({
+                        "Date": date, "Type": "BUY (Averaging Dip)", "Price": round(price, 2), 
+                        "Quantity": round(qty_bought, 4), "Value": buy_amount, "Holdings": round(quantity, 4)
+                    })
+                
+                # 3. Execute Sell (Half Quantity on Strong Bounce)
+                elif row['sell_signal'] and quantity > 0:
+                    qty_sold = quantity * 0.5
+                    sell_value = qty_sold * price
+                    quantity -= qty_sold
+                    total_realized += sell_value
+                    trades.append({
+                        "Date": date, "Type": "SELL (Half Qty)", "Price": round(price, 2), 
+                        "Quantity": round(qty_sold, 4), "Value": round(sell_value, 2), "Holdings": round(quantity, 4)
+                    })
     # 1. Primary Buy (Jab aapki main condition true ho)
     if row['buy_signal']:
         qty_bought = buy_amount / price
